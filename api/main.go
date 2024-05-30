@@ -16,9 +16,7 @@ func main(){
 		
 		panic(err)
 	}
-	// if err:= database.DB.AutoMigrate(&models.User{}) ; err!=nil{
-	// 	 panic(err)
-	// }
+
     
 	router := gin.Default()
 	
