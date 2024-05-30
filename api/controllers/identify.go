@@ -8,6 +8,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type User struct {
+	 PhoneNumber string
+	 Email string
+}
+
 func IdentifyController(c *gin.Context){
 	var allContacts []models.Contact
 	result := database.DB.Find(&allContacts)
@@ -21,7 +26,7 @@ func IdentifyController(c *gin.Context){
 
 func LinkIdentity(context *gin.Context){
    
-	 var userDetails models.User
+	 var userDetails User
 
 	 if err:= context.BindJSON(&userDetails) ; err!=nil{
 		context.JSON(http.StatusBadRequest,gin.H{"error":err.Error()})
