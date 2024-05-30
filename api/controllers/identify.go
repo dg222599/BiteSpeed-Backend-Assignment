@@ -30,18 +30,16 @@ func LinkIdentity(context *gin.Context){
 	
 	 var sameEmailContacts,samePhoneContacts []models.Contact
 
-	 result1 := database.DB.Where("phone_number=?",userDetails.PhoneNumber).Find(&samePhoneContacts)
-	 result2 := database.DB.Where("email=?",userDetails.Email).Find(&sameEmailContacts)
+	 matchedPhoneResults := database.DB.Where("phone_number=?",userDetails.PhoneNumber).Find(&samePhoneContacts)
+	 matchedEmailResults := database.DB.Where("email=?",userDetails.Email).Find(&sameEmailContacts)
 
-	 if result1.RowsAffected > 0 {
-
-		context.JSON(http.StatusOK,gin.H{"email":parentContact1.Email,"phoneNumber":parentContact1.PhoneNumber})
-	 } else if result2.RowsAffected > 0 {
-
-		context.JSON(http.StatusOK,gin.H{"email":parentContact2.Email,"phoneNumber":parentContact2.PhoneNumber})
+	 if matchedEmailResults.RowsAffected > 0 && matchedPhoneResults.RowsAffected > 0 {
+		 // found matched records with both email and phone
+	 } else if matchedEmailResults.RowsAffected > 0 || matchedPhoneResults.RowsAffected > 0 {
+		 // found matched records based on either the Phone or Email
 	 } else {
-		
 		 //need to create the new contact since  there is no contact with this phone/email
+
 		 newContact := models.Contact{
 				PhoneNumber: userDetails.PhoneNumber,
 				Email:userDetails.Email,
@@ -52,7 +50,7 @@ func LinkIdentity(context *gin.Context){
 		 if saveResult.RowsAffected > 0 {
 			context.JSON(http.StatusOK,gin.H{"email":newContact.Email,"phoneNumber":newContact.PhoneNumber})
 		 } else {
-			context.JSON(http.StatusNotFound,gin.H{"status":"RECORD NOT SAVED"})
+			context.JSON(http.StatusNotFound,gin.H{"status":"RECORD NOT SAVED" ,"error":saveResult.Error})
 		 }
 	 }
 }
