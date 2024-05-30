@@ -52,10 +52,11 @@ func LinkIdentity(context *gin.Context){
 		 }
 
 		 saveResult := database.DB.Save(&newContact)
+
 		 if saveResult.RowsAffected > 0 {
 			context.JSON(http.StatusOK,gin.H{"email":newContact.Email,"phoneNumber":newContact.PhoneNumber})
 		 } else {
-			context.JSON(http.StatusNotFound,gin.H{"status":"RECORD NOT SAVED" ,"error":saveResult.Error})
+			context.JSON(http.StatusBadRequest,gin.H{"status":"RECORD NOT SAVED" ,"error":saveResult.Error})
 		 }
 	 }
 }
