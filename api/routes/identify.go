@@ -8,4 +8,5 @@ import (
 func IdentityApp(router *gin.Engine){
 	router.GET("/identify",controllers.IdentifyController)
 	router.POST("/identify",controllers.LinkIdentity)
+	router.DELETE("/remove/:id",controllers.DeleteContact)
 }

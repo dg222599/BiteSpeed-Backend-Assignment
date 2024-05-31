@@ -10,18 +10,10 @@ import (
 func main(){ 
 	
 	database.ConnectDB()
-
-	
 	if err:=database.DB.AutoMigrate(&models.Contact{}) ; err!=nil{
-		
 		panic(err)
 	}
-
-    
 	router := gin.Default()
-	
-	
 	routes.IdentityApp(router)
-
 	router.Run(":3000")
 }
