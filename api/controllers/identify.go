@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -13,6 +12,14 @@ import (
 type User struct {
 	 PhoneNumber string
 	 Email string
+}
+
+type combinedContact struct {
+	PrimaryContactId uint `json:"primaryContactId"`
+	Emails []string	`json:"emails"`
+	PhoneNumbers []string `json:"phoneNumbers"`
+	SecondaryContactIds []uint `json:"secondaryContactIds"`
+
 }
 
 func IdentifyController(c *gin.Context){
@@ -43,6 +50,57 @@ func DeleteContact(c *gin.Context){
 	}
 }
 
+// helper function
+func combineContacts(primaryID uint) combinedContact {
+
+	// need to find all contacts which have linkedID = primaryID
+	//   {
+	// 	"contact":{
+	// 		"primaryContatctId": number,
+	// 		"emails": string[], // first element being email of primary contact 
+	// 		"phoneNumbers": string[], // first element being phoneNumber of primary contact
+	// 		"secondaryContactIds": number[] // Array of all Contact IDs that are "secondary" to the primary contact
+	// 	}
+	// }
+
+	completeContactData := combinedContact{}
+
+	//assign ID
+	completeContactData.PrimaryContactId = primaryID
+
+	var primaryContact models.Contact
+	primaryContactResult := database.DB.Where("id=?",primaryID).Find(&primaryContact)
+	if primaryContactResult.RowsAffected <=0 {
+		 return completeContactData
+	}
+
+	//assign first email
+	completeContactData.Emails = append(completeContactData.Emails,primaryContact.Email)
+	completeContactData.PhoneNumbers = append(completeContactData.PhoneNumbers, primaryContact.PhoneNumber)
+
+	// find all the contacts which are related to this primary contact
+	var relatedContacts []models.Contact
+	result:= database.DB.Where("linked_id=?",primaryID).Find(&relatedContacts)
+
+	if result.RowsAffected <=0 {
+		 return completeContactData
+	}
+
+
+	for index:=0;index<len(relatedContacts);index++ {
+		 
+		// need to append email,phonenumber,id in seconddarycontactIDs
+		completeContactData.Emails = append(completeContactData.Emails,relatedContacts[index].Email)
+		completeContactData.PhoneNumbers = append(completeContactData.PhoneNumbers,relatedContacts[index].PhoneNumber)
+		completeContactData.SecondaryContactIds = append(completeContactData.SecondaryContactIds, relatedContacts[index].ID)
+	}
+
+	return completeContactData
+
+
+	 
+}
+ 
 func LinkIdentity(context *gin.Context){
    
 	 var userDetails User
@@ -76,34 +134,41 @@ func LinkIdentity(context *gin.Context){
 			 updatedResult:=database.DB.Save(&primaryEmailContact)
 
 			 if updatedResult.RowsAffected > 0 {
-				 context.JSON(http.StatusOK,gin.H{"status":"contacts updated"})
+				
+				consolidatedContact:=combineContacts(primaryPhoneContact.ID)
+				context.JSON(http.StatusOK,gin.H{"contact":consolidatedContact})
+	
 			 }
 		} else if emailResultPrimary.RowsAffected > 0 || phoneResultPrimary.RowsAffected > 0 {
 
 			 //found primary match in only one
-
-			 if emailResultPrimary.RowsAffected > 0 {
-				newContact := models.Contact{
-					PhoneNumber: userDetails.PhoneNumber,
-					Email:userDetails.Email,
-					LinkPrecedence : "secondary",
-					LinkedID:primaryEmailContact.ID,
-			 	}
-	
-				saveResult := database.DB.Save(&newContact)
-				fmt.Println(saveResult)
-			 } else {
-				newContact := models.Contact{
-					PhoneNumber: userDetails.PhoneNumber,
-					Email:userDetails.Email,
-					LinkPrecedence : "secondary",
-					LinkedID:primaryPhoneContact.ID,
-			 	}
-	
-				saveResult := database.DB.Save(&newContact)
-				fmt.Println(saveResult)
+			 newContact := models.Contact{
+				PhoneNumber: userDetails.PhoneNumber,
+				Email:userDetails.Email,
+				LinkPrecedence : "secondary",
+				
 			 }
-			 // either phone matched or email matched to a primary contact
+
+			 
+			 if emailResultPrimary.RowsAffected > 0 {
+				 newContact.LinkedID = primaryEmailContact.ID
+			 } else {
+				 newContact.LinkedID = primaryPhoneContact.ID
+			 }
+
+			 saveResult := database.DB.Save(&newContact)
+			 if saveResult.RowsAffected <=0 {
+					return
+			 }
+
+			 
+			 consolidatedContact:=combineContacts(newContact.LinkedID)
+
+			 if saveResult.RowsAffected > 0 {
+				context.JSON(http.StatusOK,gin.H{"contact":consolidatedContact})
+			 } else {
+				context.JSON(http.StatusBadRequest,gin.H{"status":"RECORD NOT SAVED" ,"error":saveResult.Error})
+			 }
 		} else {
 			 // no match in primary contacts  , proceed to secondary
 			 //need to create the new contact since  there is no contact with this phone/email
@@ -116,12 +181,14 @@ func LinkIdentity(context *gin.Context){
 
 			saveResult := database.DB.Save(&newContact)
 
+			consolidatedContact:=combineContacts(newContact.ID)
+
 			if saveResult.RowsAffected > 0 {
-				context.JSON(http.StatusOK,gin.H{"email":newContact.Email,"phoneNumber":newContact.PhoneNumber})
+				context.JSON(http.StatusOK,gin.H{"contact":consolidatedContact})
 			} else {
 				context.JSON(http.StatusBadRequest,gin.H{"status":"RECORD NOT SAVED" ,"error":saveResult.Error})
 			}
 			// none of phone/email matched to primary contact , create a new primary contact 
 		}
-	}
+}
 }
