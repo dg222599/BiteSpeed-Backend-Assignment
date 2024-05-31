@@ -1,0 +1,11 @@
+Possible Scenarios which needs to be tested | Status
+
+tested
+
+1 - At least one non empty field  either email/phone should be present    |  [OK]  
+ 
+
+
+# to be tested (more to be added)
+
+- 

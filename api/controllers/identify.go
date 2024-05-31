@@ -52,17 +52,7 @@ func DeleteContact(c *gin.Context){
 
 // helper function
 func combineContacts(primaryID uint) combinedContact {
-
-	// need to find all contacts which have linkedID = primaryID
-	//   {
-	// 	"contact":{
-	// 		"primaryContatctId": number,
-	// 		"emails": string[], // first element being email of primary contact 
-	// 		"phoneNumbers": string[], // first element being phoneNumber of primary contact
-	// 		"secondaryContactIds": number[] // Array of all Contact IDs that are "secondary" to the primary contact
-	// 	}
-	// }
-
+	
 	completeContactData := combinedContact{}
 
 	//assign ID
@@ -96,9 +86,6 @@ func combineContacts(primaryID uint) combinedContact {
 	}
 
 	return completeContactData
-
-
-	 
 }
  
 func LinkIdentity(context *gin.Context){
@@ -108,6 +95,12 @@ func LinkIdentity(context *gin.Context){
 	 if err:= context.BindJSON(&userDetails) ; err!=nil{
 		context.JSON(http.StatusBadRequest,gin.H{"error":err.Error()})
 		return 
+	 }
+
+	 if userDetails.Email == "" && userDetails.PhoneNumber == "" {
+		 //both the fields are empty
+		 context.JSON(http.StatusBadRequest,gin.H{"message":"Bad-Request at least one field should be given"})
+		 return
 	 }
 
 	 var alreadyPresentRecord models.Contact
