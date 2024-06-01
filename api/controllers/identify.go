@@ -57,6 +57,9 @@ func combineContacts(primaryID uint) combinedContact {
 	completeContactData := combinedContact{}
 
 	//assign ID
+	uniqueEmails := make(map[string]bool)
+	uniquePhoneNumbers := make(map[string]bool)
+
 	completeContactData.PrimaryContactId = primaryID
 
 	var primaryContact models.Contact
@@ -67,8 +70,17 @@ func combineContacts(primaryID uint) combinedContact {
 
 	//assign first email
 	
-	completeContactData.Emails = append(completeContactData.Emails,primaryContact.Email)
-	completeContactData.PhoneNumbers = append(completeContactData.PhoneNumbers, primaryContact.PhoneNumber)
+	if primaryContact.Email != nil {
+		completeContactData.Emails = append(completeContactData.Emails,primaryContact.Email)
+		uniqueEmails[*primaryContact.Email] = true
+	}
+
+	if primaryContact.PhoneNumber != nil {
+		completeContactData.PhoneNumbers = append(completeContactData.PhoneNumbers, primaryContact.PhoneNumber)
+		uniquePhoneNumbers[*primaryContact.PhoneNumber] = true
+	}
+	
+	
 
 	// find all the contacts which are related to this primary contact
 	var relatedContacts []models.Contact
@@ -82,15 +94,34 @@ func combineContacts(primaryID uint) combinedContact {
 	for index:=0;index<len(relatedContacts);index++ {
 		 
 		// need to append email,phonenumber,id in seconddarycontactIDs
-		completeContactData.Emails = append(completeContactData.Emails,relatedContacts[index].Email)
-		completeContactData.PhoneNumbers = append(completeContactData.PhoneNumbers,relatedContacts[index].PhoneNumber)
-		completeContactData.SecondaryContactIds = append(completeContactData.SecondaryContactIds, relatedContacts[index].ID)
+
+		var newContact bool
+		newContact  = false
+		if relatedContacts[index].Email != nil && !uniqueEmails[*relatedContacts[index].Email] {
+			completeContactData.Emails = append(completeContactData.Emails,relatedContacts[index].Email)
+			uniqueEmails[*relatedContacts[index].Email] = true
+			newContact = true
+		}
+
+		if relatedContacts[index].PhoneNumber != nil && !uniquePhoneNumbers[*relatedContacts[index].PhoneNumber] {
+			completeContactData.PhoneNumbers = append(completeContactData.PhoneNumbers,relatedContacts[index].PhoneNumber)
+			uniquePhoneNumbers[*relatedContacts[index].PhoneNumber] = true
+			newContact = true
+		}
+		
+		// completeContactData.PhoneNumbers = append(completeContactData.PhoneNumbers,relatedContacts[index].PhoneNumber)
+		if newContact {
+			completeContactData.SecondaryContactIds = append(completeContactData.SecondaryContactIds, relatedContacts[index].ID)
+		}
+		
 	}
 
 	return completeContactData
 }
 func ValidateRequest(userDetails *User) bool {
 	// at least one non null value and should be string
+
+	
 	
 	if  userDetails.Email == nil && userDetails.PhoneNumber == nil {
 		 return false
@@ -115,6 +146,8 @@ func ValidateRequest(userDetails *User) bool {
 }
 func LinkIdentity(context *gin.Context){
    
+	 primaryPrecedence := "primary"
+	 secondaryPrecedence := "secondary"
 	 var userDetails User
 
 	 
@@ -154,13 +187,51 @@ func LinkIdentity(context *gin.Context){
 
 
 	 if contactAlreadyPresent.RowsAffected > 0 {
-		context.JSON(http.StatusFound,gin.H{"status":"record already present"})
+		
+		var connectionID uint
+		if alreadyPresentRecord.LinkedID !=nil {
+			 connectionID = *alreadyPresentRecord.LinkedID
+		} else {
+			 connectionID = alreadyPresentRecord.ID
+		}
+		consolidatedContact:=combineContacts(connectionID)
+		context.JSON(http.StatusOK,gin.H{"contact":consolidatedContact})
 		return
 	 } else {
 		
 	    var primaryEmailContact,primaryPhoneContact models.Contact
 
 		var phoneResultPrimary,emailResultPrimary * gorm.DB
+
+		var secondaryRecordPresent *gorm.DB
+		var bogus models.Contact
+
+		if userDetails.PhoneNumber != nil {
+			 secondaryRecordPresent = database.DB.Where("phone_number=? and link_precedence=?",userDetails.PhoneNumber,"secondary").Order("created_at").First(&bogus)
+
+		}
+
+		if secondaryRecordPresent.RowsAffected > 0 {
+			 
+			 consolidatedContact := combineContacts(*bogus.LinkedID)
+			 context.JSON(http.StatusOK,gin.H{"contact":consolidatedContact})
+			 return
+		}
+
+		if userDetails.Email != nil {
+			secondaryRecordPresent = database.DB.Where("email=? and link_precedence=?",userDetails.Email,"secondary").Order("created_at").First(&bogus)
+
+	    }
+
+		if secondaryRecordPresent.RowsAffected > 0 {
+			
+			consolidatedContact := combineContacts(*bogus.LinkedID)
+
+			context.JSON(http.StatusOK,gin.H{"contact":consolidatedContact})
+			return
+		}
+
+
 		
 		// denotes the record where a primary contact has same email/phone as current contact
 		if userDetails.PhoneNumber != nil {
@@ -176,21 +247,45 @@ func LinkIdentity(context *gin.Context){
 			  //found primary match in both(can be same contact can be not)
 			 // email coming from one contact and phone coming from another contact
 			 //create link either way
-			 primaryEmailContact.LinkedID = primaryPhoneContact.ID
-			 primaryEmailContact.LinkPrecedence = "secondary"
-			 updatedResult:=database.DB.Save(&primaryEmailContact)
+			 var newestContact models.Contact
+			 newestContactResult := database.DB.Where("id in ?",[]uint{primaryEmailContact.ID,primaryPhoneContact.ID}).Order("created_at desc").First(&newestContact)
+			 
+			 if newestContactResult.RowsAffected <=0 {
+				 //
+			 }
+			 var updatedResult *gorm.DB
+			 fmt.Println("------------------------->",newestContact.ID)
+			 if newestContact.ID == primaryEmailContact.ID {
+				 
+				 updatedResult = database.DB.Model(&models.Contact{}).Where("id=?",newestContact.ID).Update("linked_id",primaryPhoneContact.ID)
+
+			 } else {
+				 
+				 updatedResult = database.DB.Model(&models.Contact{}).Where("id=?",newestContact.ID).Update("linked_id",primaryEmailContact.ID)
+				 
+			 }
+			 
+			 updatedResult = database.DB.Model(&models.Contact{}).Where("id=?",newestContact.ID).Update("link_precedence","secondary")
+
+			 
 
 			 if updatedResult.RowsAffected > 0 {
 				
-				consolidatedContact:=combineContacts(primaryPhoneContact.ID)
+				var consolidatedContact combinedContact
+				if newestContact.ID == primaryEmailContact.ID {
+					consolidatedContact = combineContacts(primaryPhoneContact.ID)
+				} else {
+					consolidatedContact = combineContacts(primaryEmailContact.ID) 
+				}
+				
 				context.JSON(http.StatusOK,gin.H{"contact":consolidatedContact})
-	
+				return
 			 }
 		} else if (emailResultPrimary!= nil && emailResultPrimary.RowsAffected>0 ) || (phoneResultPrimary != nil && phoneResultPrimary.RowsAffected > 0){
 
 			 //found primary match in only one
 			 newContact := models.Contact{
-				LinkPrecedence : "secondary",
+				LinkPrecedence : &secondaryPrecedence,
 				Email: nil,
 				PhoneNumber: nil,
 		 	 }
@@ -212,9 +307,9 @@ func LinkIdentity(context *gin.Context){
 
 			 
 			 if emailResultPrimary.RowsAffected > 0 {
-				 newContact.LinkedID = primaryEmailContact.ID
+				 newContact.LinkedID = &primaryEmailContact.ID
 			 } else {
-				 newContact.LinkedID = primaryPhoneContact.ID
+				 newContact.LinkedID = &primaryPhoneContact.ID
 			 }
 
 			 saveResult := database.DB.Save(&newContact)
@@ -223,7 +318,7 @@ func LinkIdentity(context *gin.Context){
 			 }
 
 			 
-			 consolidatedContact:=combineContacts(newContact.LinkedID)
+			 consolidatedContact:=combineContacts(*newContact.LinkedID)
 
 			 if saveResult.RowsAffected > 0 {
 				context.JSON(http.StatusOK,gin.H{"contact":consolidatedContact})
@@ -235,7 +330,7 @@ func LinkIdentity(context *gin.Context){
 			 //need to create the new contact since  there is no contact with this phone/email
 			 fmt.Println("reaced till print 0")
 			 newContact := models.Contact{
-				LinkPrecedence : "primary",
+				LinkPrecedence : &primaryPrecedence,
 				Email: nil,
 				PhoneNumber: nil,
 		 	 }
