@@ -1,23 +1,26 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 
 	database "github.com/dg222599/BiteSpeed-Backend-Assignment/database"
 	models "github.com/dg222599/BiteSpeed-Backend-Assignment/models"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type User struct {
-	 PhoneNumber string
-	 Email string
+	 PhoneNumber interface{}
+	 Email interface{}
 }
 
 type combinedContact struct {
 	PrimaryContactId uint `json:"primaryContactId"`
-	Emails []string	`json:"emails"`
-	PhoneNumbers []string `json:"phoneNumbers"`
+	Emails []*string	`json:"emails"`
+	PhoneNumbers []*string `json:"phoneNumbers"`
 	SecondaryContactIds []uint `json:"secondaryContactIds"`
 
 }
@@ -32,7 +35,6 @@ func IdentifyController(c *gin.Context){
 	}
 	
 }
-
 func DeleteContact(c *gin.Context){
 	contactID,err:=strconv.ParseUint(c.Param("id"),10,64)
 	if err!=nil{
@@ -49,7 +51,6 @@ func DeleteContact(c *gin.Context){
 		 c.JSON(http.StatusBadRequest,gin.H{"status":"no such contact with given ID"})
 	}
 }
-
 // helper function
 func combineContacts(primaryID uint) combinedContact {
 	
@@ -65,12 +66,13 @@ func combineContacts(primaryID uint) combinedContact {
 	}
 
 	//assign first email
+	
 	completeContactData.Emails = append(completeContactData.Emails,primaryContact.Email)
 	completeContactData.PhoneNumbers = append(completeContactData.PhoneNumbers, primaryContact.PhoneNumber)
 
 	// find all the contacts which are related to this primary contact
 	var relatedContacts []models.Contact
-	result:= database.DB.Where("linked_id=?",primaryID).Find(&relatedContacts)
+	result:= database.DB.Where("linked_id=?",primaryID).Order("created_at").Find(&relatedContacts)
 
 	if result.RowsAffected <=0 {
 		 return completeContactData
@@ -87,25 +89,69 @@ func combineContacts(primaryID uint) combinedContact {
 
 	return completeContactData
 }
- 
+func ValidateRequest(userDetails *User) bool {
+	// at least one non null value and should be string
+	
+	if  userDetails.Email == nil && userDetails.PhoneNumber == nil {
+		 return false
+	} else if (userDetails.Email == nil || userDetails.PhoneNumber == nil) {
+		
+		if((userDetails.Email!=nil) && (reflect.TypeOf(userDetails.Email).Kind()==reflect.String) && userDetails.Email!=""){
+			 return true
+		} else if ((userDetails.PhoneNumber!=nil) && (reflect.TypeOf(userDetails.PhoneNumber).Kind()==reflect.String) && userDetails.PhoneNumber!=""){
+			 return true
+		} else {
+			 return false
+		}
+ 		
+	} else {
+		
+		  if(reflect.TypeOf(userDetails.Email).Kind()==reflect.String  && reflect.TypeOf(userDetails.PhoneNumber).Kind()==reflect.String && userDetails.PhoneNumber!="" && userDetails.Email!=""){
+			 return true
+		  }  else {
+			 return false
+		  }
+	}
+}
 func LinkIdentity(context *gin.Context){
    
 	 var userDetails User
 
+	 
 	 if err:= context.BindJSON(&userDetails) ; err!=nil{
 		context.JSON(http.StatusBadRequest,gin.H{"error":err.Error()})
 		return 
 	 }
 
-	 if userDetails.Email == "" && userDetails.PhoneNumber == "" {
+	 validationResult:=ValidateRequest(&userDetails)
+
+     
+	  
+	 if !validationResult {
 		 //both the fields are empty
-		 context.JSON(http.StatusBadRequest,gin.H{"message":"Bad-Request at least one field should be given"})
+		 exampleRequest := User{
+			Email:"abc@gmail.com",
+			PhoneNumber:"12345678",
+		 }
+		 context.JSON(http.StatusBadRequest,gin.H{"message":"Bad-Request - all the non null fields should be a non-empty string","example":exampleRequest})
 		 return
 	 }
 
+	 
+
 	 var alreadyPresentRecord models.Contact
 
-	 contactAlreadyPresent := database.DB.Where("phone_number=? and email=?",userDetails.PhoneNumber,userDetails.Email).First(&alreadyPresentRecord)
+
+	 var contactAlreadyPresent *gorm.DB
+
+	 if userDetails.Email != nil && userDetails.PhoneNumber != nil {
+		contactAlreadyPresent = database.DB.Where("phone_number=? and email=?",userDetails.PhoneNumber,userDetails.Email).First(&alreadyPresentRecord)
+	 } else if userDetails.Email != nil {
+		contactAlreadyPresent = database.DB.Where("email=?",userDetails.Email).First(&alreadyPresentRecord)
+	 } else if userDetails.PhoneNumber != nil {
+	    contactAlreadyPresent = database.DB.Where("phone_number=?",userDetails.PhoneNumber).First(&alreadyPresentRecord)	 
+	 }
+
 
 	 if contactAlreadyPresent.RowsAffected > 0 {
 		context.JSON(http.StatusFound,gin.H{"status":"record already present"})
@@ -113,12 +159,20 @@ func LinkIdentity(context *gin.Context){
 	 } else {
 		
 	    var primaryEmailContact,primaryPhoneContact models.Contact
+
+		var phoneResultPrimary,emailResultPrimary * gorm.DB
 		
 		// denotes the record where a primary contact has same email/phone as current contact
-		phoneResultPrimary := database.DB.Where("phone_number=? and link_precedence=?",userDetails.PhoneNumber,"primary").Find(&primaryPhoneContact)
-	 	emailResultPrimary := database.DB.Where("email=? and link_precedence=?",userDetails.Email,"primary").Find(&primaryEmailContact)
+		if userDetails.PhoneNumber != nil {
+			phoneResultPrimary = database.DB.Where("phone_number=? and link_precedence=?",userDetails.PhoneNumber,"primary").Order("created_at").First(&primaryPhoneContact)
+	 	}
+
+		if userDetails.Email != nil {
+			emailResultPrimary = database.DB.Where("email=? and link_precedence=?",userDetails.Email,"primary").Order("created_at").First(&primaryEmailContact)
+		}
 		
-		if emailResultPrimary.RowsAffected > 0 && phoneResultPrimary.RowsAffected > 0 {
+		
+		if (emailResultPrimary!= nil && emailResultPrimary.RowsAffected>0 ) && (phoneResultPrimary != nil && phoneResultPrimary.RowsAffected > 0) {
 			  //found primary match in both(can be same contact can be not)
 			 // email coming from one contact and phone coming from another contact
 			 //create link either way
@@ -132,15 +186,29 @@ func LinkIdentity(context *gin.Context){
 				context.JSON(http.StatusOK,gin.H{"contact":consolidatedContact})
 	
 			 }
-		} else if emailResultPrimary.RowsAffected > 0 || phoneResultPrimary.RowsAffected > 0 {
+		} else if (emailResultPrimary!= nil && emailResultPrimary.RowsAffected>0 ) || (phoneResultPrimary != nil && phoneResultPrimary.RowsAffected > 0){
 
 			 //found primary match in only one
 			 newContact := models.Contact{
-				PhoneNumber: userDetails.PhoneNumber,
-				Email:userDetails.Email,
 				LinkPrecedence : "secondary",
-				
-			 }
+				Email: nil,
+				PhoneNumber: nil,
+		 	 }
+
+			if userDetails.Email != nil {
+				if email, ok := userDetails.Email.(string); ok {
+					// Type assertion successful, assign the string value to userEmail
+					newContact.Email = &email
+				} 
+			} 
+			
+			// Check if userDetails.PhoneNumber is not nil before type assertion
+			if userDetails.PhoneNumber != nil {
+				if phoneNumber, ok := userDetails.PhoneNumber.(string); ok {
+					// Type assertion successful, assign the string value to userPhoneNumber
+					newContact.PhoneNumber = &phoneNumber
+				}
+			}	
 
 			 
 			 if emailResultPrimary.RowsAffected > 0 {
@@ -165,13 +233,29 @@ func LinkIdentity(context *gin.Context){
 		} else {
 			 // no match in primary contacts  , proceed to secondary
 			 //need to create the new contact since  there is no contact with this phone/email
-
+			 fmt.Println("reaced till print 0")
 			 newContact := models.Contact{
-				PhoneNumber: userDetails.PhoneNumber,
-				Email:userDetails.Email,
 				LinkPrecedence : "primary",
-		 	}
-
+				Email: nil,
+				PhoneNumber: nil,
+		 	 }
+			 fmt.Println("reaced till print 1")
+			if userDetails.Email != nil {
+				if email, ok := userDetails.Email.(string); ok {
+					// Type assertion successful, assign the string value to userEmail
+					newContact.Email = &email
+				} 
+			} 
+			
+			// Check if userDetails.PhoneNumber is not nil before type assertion
+			if userDetails.PhoneNumber != nil {
+				if phoneNumber, ok := userDetails.PhoneNumber.(string); ok {
+					// Type assertion successful, assign the string value to userPhoneNumber
+					newContact.PhoneNumber = &phoneNumber
+				}
+			}
+			 
+			fmt.Println("reached till print -2")
 			saveResult := database.DB.Save(&newContact)
 
 			consolidatedContact:=combineContacts(newContact.ID)

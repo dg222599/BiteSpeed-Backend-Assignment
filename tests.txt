@@ -3,7 +3,8 @@ Possible Scenarios which needs to be tested | Status
 tested
 
 1 - At least one non empty field  either email/phone should be present    |  [OK]  
- 
+2 - If one field does not match and other match due to being null then contact should not be connected  | [Pending] 
+3 - 
 
 
 # to be tested (more to be added)
